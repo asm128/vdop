@@ -60,7 +60,11 @@ struct SApplication {
 						::SRasterCache										RasterCache										= {};
 						double												CameraAngle										= .25;//.25;
 						::SCamera											Camera											= {{10, 5, 0}, {}};
-						::SObjectAxes										CameraAxes										= {};
+						::SObjectAxes										CameraAxes										= 
+							{ {1, 0, 0}
+							, {0, 1, 0}
+							, {0, 0, 1}
+							};
 						::SCameraDepth										CameraDepth										= {};
 						::SLightDirectional									LightDirectional								= {};
 

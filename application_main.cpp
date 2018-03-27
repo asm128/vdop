@@ -71,12 +71,15 @@ static				::llc::error_t										updateSizeDependentResources				(::SApplicatio
 	::llc::SCoord3<float>														& lightDir									= applicationInstance.LightDirectional.Direction; //
 	lightDir																= {10, 5, 0};
 
+	applicationInstance.BoxPivot.Scale										= {.5, 1, 2.5};
+	applicationInstance.BoxPivot.Position									= {0, 0, 0};
+	applicationInstance.BoxPivot.Orientation								= applicationInstance.BoxPivot.Orientation;
+
 	// Set up camera
 	applicationInstance.CameraAngle											= .25;//.25;
 	applicationInstance.Camera												= {{10, 5, 0}, {}};
 	applicationInstance.CameraAxes											= {};
-	applicationInstance.CameraDepth											= {20.f, 0.01f};
-
+	applicationInstance.CameraDepth											= {100.f, 0.01f};
 	ree_if(errored(::updateSizeDependentResources(applicationInstance)), "Cannot update offscreen and textures and this could cause an invalid memory access later on.");
 	return 0;
 }
@@ -92,24 +95,33 @@ static				::llc::error_t										updateSizeDependentResources				(::SApplicatio
 	if(applicationInstance.Framework.Input.KeyboardCurrent.KeyState[VK_ADD		])	applicationInstance.CameraAngle += frameInfo.Seconds.LastFrame * .05f;
 	if(applicationInstance.Framework.Input.KeyboardCurrent.KeyState[VK_SUBTRACT	])	applicationInstance.CameraAngle -= frameInfo.Seconds.LastFrame * .05f;
 
-	// Update Light
+	// ------------------------------ Update Light
 	::llc::SCoord3<float>														& lightDir									= applicationInstance.LightDirectional.Direction; 
-	lightDir.RotateY(frameInfo.Seconds.LastFrame);
+	//lightDir.RotateY(frameInfo.Seconds.LastFrame);
 	lightDir.Normalize();
 
-	// Update Camera
+	// ------------------------------ Update Camera
 	::SCamera																	& camera									= applicationInstance.Camera;
 	float																		cameraRotation								= 0;
 	cameraRotation															+= (float)framework.Input.MouseCurrent.Deltas.x / 20.0f;
 	if(framework.Input.MouseCurrent.Deltas.z) {
 		::llc::SCoord3<float>														cameraZoomDirection							= camera.Position;
 		cameraZoomDirection.Normalize();
-		camera.Position															+= cameraZoomDirection * (framework.Input.MouseCurrent.Deltas.z / WHEEL_DELTA) * frameInfo.Seconds.LastFrame;
+		camera.Position															+= cameraZoomDirection * (framework.Input.MouseCurrent.Deltas.z / WHEEL_DELTA) * frameInfo.Seconds.LastFrame * 3;
 	}
 	camera.Position	.RotateY(cameraRotation);
-
 	//camera.Position	.RotateY(frameInfo.Microseconds.Total / 1000000.0f);
 	::SObjectAxes																& cameraAxes								= applicationInstance.CameraAxes;
+	//::llc::SMatrix4<float>														mrotx, mroty;
+	//mrotx.RotationY				( framework.Input.MouseCurrent.Deltas.y );
+	//mroty.RotationArbitraryAxis	( cameraAxes.Right, (float)framework.Input.MouseCurrent.Deltas.x );
+	//cameraAxes.Front.Normalize();
+	//cameraAxes.Front														= mrotx.Transform(cameraAxes.Front);
+	//cameraAxes.Front														= mroty.Transform(cameraAxes.Front);
+	//cameraAxes.Right														= mroty.Transform(cameraAxes.Right);
+	//cameraAxes.Up															= mrotx.Transform(cameraAxes.Up);
+	//cameraAxes.Up															= mroty.Transform(cameraAxes.Up);
+	//cameraAxes.Front.Normalize();
 	cameraAxes.Front														= (camera.Target - camera.Position).Normalize();
 	cameraAxes.Up															= {0, 1, 0};
 	cameraAxes.Right														= cameraAxes.Up.Cross(cameraAxes.Front).Normalize();
@@ -136,6 +148,9 @@ static				::llc::error_t										updateSizeDependentResources				(::SApplicatio
 	viewportInverse._41														+= screenCenter.x;
 	viewportInverse._42														+= screenCenter.y;
 	projection																*= viewportInverse;
+	applicationInstance.BoxPivot.Orientation.y								+= (float)(sinf((float)frameInfo.Seconds.Total / 2) * ::llc::math_pi);
+	applicationInstance.BoxPivot.Orientation.w								= 1;
+	applicationInstance.BoxPivot.Orientation.Normalize();
 	return 0;
 }
 
@@ -205,12 +220,22 @@ static				::llc::error_t										textDrawAlignedFixedSize					(::llc::grid_view
 		rasterCache.Triangle2dListDrawn	.clear();
 		rasterCache.TriangleIndicesDrawn.clear();
 		rasterCache.PixelCounts			.clear();
+		::llc::SMatrix4<float>														matrixScale, matrixRotation, matrixTranslation;
+		matrixScale			.Scale			(applicationInstance.BoxPivot.Scale, true);
+		matrixRotation		.SetOrientation	((applicationInstance.BoxPivot.Orientation + ::llc::SQuaternion<float>{0, (float)(iBox / ::llc::math_2pi), 0, 0}).Normalize());
+		matrixTranslation	.SetTranslation	(applicationInstance.BoxPivot.Position + ::llc::SCoord3<float>{(float)iBox, 0, 0}, true);
+		::llc::SMatrix4<float>														matrixWorld									= matrixScale * matrixRotation * matrixTranslation;
+		::llc::SMatrix4<float>														matrixWP									= matrixWorld * projection;
 		for(uint32_t iTriangle = 0, countTris = rasterCache.Triangle3dList.size(); iTriangle < countTris; ++iTriangle) {
 			::llc::STriangle3D<float>													& transformedTriangle						= rasterCache.Triangle3dList[iTriangle];
 			transformedTriangle														= applicationInstance.ModelBox.Geometry.Positions[iTriangle];
-			::llc::scale	(transformedTriangle, {.5, 1, 2.5});
-			::llc::translate(transformedTriangle, {(float)iBox, 0, 0});
-			::llc::transform(transformedTriangle, projection);
+			::llc::transform(transformedTriangle, matrixWP);
+		}
+		for(uint32_t iTriangle = 0, countTris = rasterCache.Triangle3dList.size(); iTriangle < countTris; ++iTriangle) {
+			::llc::SCoord3<float>														normaltransformed							= matrixRotation.Transform(applicationInstance.ModelBox.Geometry.Normals[iTriangle]);
+			normaltransformed.Normalize();
+			double																		lightFactor									= normaltransformed.Dot(lightDir);
+			rasterCache.Triangle3dColorList[iTriangle]								= ::llc::GREEN * lightFactor;
 		}
 		for(uint32_t iTriangle = 0, countTris = rasterCache.Triangle3dList.size(); iTriangle < countTris; ++iTriangle) {
 			const ::llc::STriangle3D<float>												& transformedTriangle3D						= rasterCache.Triangle3dList[iTriangle];
@@ -219,17 +244,14 @@ static				::llc::error_t										textDrawAlignedFixedSize					(::llc::grid_view
 			transformedTriangle2D.B													= {(int32_t)transformedTriangle3D.B.x, (int32_t)transformedTriangle3D.B.y};
 			transformedTriangle2D.C													= {(int32_t)transformedTriangle3D.C.x, (int32_t)transformedTriangle3D.C.y};
 		}
-		for(uint32_t iTriangle = 0, countTris = rasterCache.Triangle3dList.size(); iTriangle < countTris; ++iTriangle) {
-			double																		lightFactor									= applicationInstance.ModelBox.Geometry.Normals[iTriangle].Dot(lightDir);
-			rasterCache.Triangle3dColorList	[iTriangle]								= ::llc::GREEN * lightFactor;
-		}
 		::llc::array_pod<::llc::SCoord2<int32_t>>									wireframePixelCoords						= {};
 		::llc::SCoord2<int32_t>														offscreenMetricsI							= offscreenMetrics.Cast<int32_t>();
 		for(uint32_t iTriangle = 0, countTris = rasterCache.Triangle3dList.size(); iTriangle < countTris; ++iTriangle) {
-			double																		lightFactor									= applicationInstance.ModelBox.Geometry.Normals[iTriangle].Dot(cameraAxes.Front);
-			const ::llc::STriangle2D<int32_t>											& currentTriangle							= rasterCache.Triangle2dList[iTriangle];
-			if(lightFactor > 0)
+			const ::llc::SCoord3<float>													normaltransformed							= matrixWorld.Transform(applicationInstance.ModelBox.Geometry.Normals[iTriangle]).Normalize();
+			double																		cameraFactor								= normaltransformed.Dot(cameraAxes.Front);
+			if(cameraFactor > 0)
 				continue;
+			const ::llc::STriangle2D<int32_t>											& currentTriangle							= rasterCache.Triangle2dList[iTriangle];
 			if(currentTriangle.A.x < 0 && currentTriangle.B.x < 0 && currentTriangle.C.x < 0) 
 				continue;
 			if(currentTriangle.A.y < 0 && currentTriangle.B.y < 0 && currentTriangle.C.y < 0) 
